@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+.kestreltalon/
+__pycache__/

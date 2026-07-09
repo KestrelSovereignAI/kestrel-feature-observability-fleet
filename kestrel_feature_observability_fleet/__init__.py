@@ -7,6 +7,27 @@ stream, and the orchestrator swimlane panel. It is the fleet *consumer*; the
 per-agent *producer* (the emitter hook) lives in ``kestrel-feature-observability``.
 """
 
-from kestrel_feature_observability_fleet.feature import FleetObservabilityHostFeature
+from kestrel_feature_observability_fleet.feature import (
+    FLEET_TENANT_ID,
+    FleetObservabilityHostFeature,
+)
+from kestrel_feature_observability_fleet.models import (
+    EVENT_TYPES,
+    GATE_EVENT_TYPES,
+    GATE_KINDS,
+    ObservabilityEvent,
+)
+from kestrel_feature_observability_fleet.redaction import redact_metadata
+from kestrel_feature_observability_fleet.store import FleetObservabilityStore, IngestError
 
-__all__ = ["FleetObservabilityHostFeature"]
+__all__ = [
+    "FleetObservabilityHostFeature",
+    "FLEET_TENANT_ID",
+    "FleetObservabilityStore",
+    "IngestError",
+    "ObservabilityEvent",
+    "EVENT_TYPES",
+    "GATE_EVENT_TYPES",
+    "GATE_KINDS",
+    "redact_metadata",
+]
