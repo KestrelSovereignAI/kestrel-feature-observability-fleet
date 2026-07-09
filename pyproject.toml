@@ -1,0 +1,72 @@
+[project]
+name = "kestrel-feature-observability-fleet"
+version = "0.1.0"
+description = "Fleet-scoped observability HostFeature for Kestrel Sovereign — fleet-wide event store (entities/tenant-scoped), host-root ingest/query, a streamable live stream, and the orchestrator swimlane panel"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "UncleSaurus" }]
+maintainers = [{ name = "UncleSaurus" }]
+keywords = [
+    "ai",
+    "agents",
+    "kestrel",
+    "observability",
+    "fleet",
+    "host-feature",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: System :: Monitoring",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # HostFeature / HostContext / UIContributions contract (Phase 0).
+    "kestrel-sovereign-sdk>=0.29.2,<0.30",
+    # Fleet event store: SQLAlchemy 2.0 async + Alembic, fail-closed tenant scoping.
+    "kestrel-feature-entities>=0.1,<1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.1.0",
+    "kestrel-sovereign-sdk>=0.29.2,<0.30",
+    "kestrel-feature-entities>=0.1,<1",
+    # Host-root routers exercised via FastAPI TestClient; host-provided at runtime.
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://kestrelsovereign.com"
+Source = "https://github.com/KestrelSovereignAI/kestrel-feature-observability-fleet"
+Issues = "https://github.com/KestrelSovereignAI/kestrel-feature-observability-fleet/issues"
+
+# Host-scoped feature discovery (Phase 1 runtime scans this group), NOT the
+# per-agent `kestrel_sovereign.features` group.
+[project.entry-points."kestrel_sovereign.host_features"]
+FleetObservabilityHostFeature = "kestrel_feature_observability_fleet.feature:FleetObservabilityHostFeature"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kestrel_feature_observability_fleet"]
+
+[tool.hatch.build.targets.sdist]
+include = ["kestrel_feature_observability_fleet/**/*", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
