@@ -1,6 +1,6 @@
 [project]
 name = "kestrel-feature-observability-fleet"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fleet-scoped observability HostFeature for Kestrel Sovereign — fleet-wide event store (entities/tenant-scoped), host-root ingest/query, a streamable live stream, and the orchestrator swimlane panel"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
