@@ -112,15 +112,28 @@ def test_get_tree_has_direct_node(client):
     assert any(n["is_direct"] and n["label"] == "Direct" for n in tree)
 
 
-def test_stream_returns_event_stream_with_preamble(client):
-    with client.stream("GET", "/api/observability/stream") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
-        assert "X-Stream-Session" in resp.headers
-        # Read just the session preamble comment, then disconnect.
-        for line in resp.iter_lines():
-            assert line.startswith(": stream ")
-            break
+@pytest.mark.asyncio
+async def test_stream_returns_event_stream_with_preamble(store):
+    import asyncio
+
+    fastapi = pytest.importorskip("fastapi")
+    import httpx
+
+    app = fastapi.FastAPI()
+    app.include_router(get_router(lambda: store))
+    # httpx AsyncClient + ASGITransport runs in *this* event loop, so the infinite
+    # SSE stream cancels cleanly on close. (A sync TestClient deadlocks its portal
+    # thread on teardown of an unbounded stream.) The read timeout guards against a
+    # genuinely stuck stream so the suite can never hang.
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with ac.stream("GET", "/api/observability/stream") as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            assert "X-Stream-Session" in resp.headers
+            # Read just the session preamble frame, then disconnect.
+            first = await asyncio.wait_for(resp.aiter_lines().__anext__(), timeout=5)
+            assert first.startswith(": stream ")
 
 
 @pytest.mark.asyncio
