@@ -1,39 +1,34 @@
-# kestrel-feature-observability — Agent Instructions
+# kestrel-feature-observability-fleet — Agent Instructions
 
-See [README.md](README.md) for package overview.
+This package is the host/fleet-scoped observability consumer. It is distinct
+from `kestrel-feature-observability`, the per-agent event producer.
 
-## Package Structure
+## Package structure
 
-```
-kestrel-feature-observability/
-├── pyproject.toml
-├── README.md
-├── kestrel_feature_observability/
-│   ├── __init__.py
-│   ├── feature.py               # ObservabilityFeature entry point
-│   └── hook.py                  # Lifecycle event hooks
-└── tests/
-    ├── test_observability_feature.py
-    └── test_tool_result_contracts.py
-```
+- `kestrel_feature_observability_fleet/feature.py` — `HostFeature` lifecycle,
+  router, host store, and UI contribution.
+- `kestrel_feature_observability_fleet/endpoints.py` — fleet ingest/query/tree/
+  stream API under `/api/host/observability/*`.
+- `kestrel_feature_observability_fleet/store.py` — tenant-scoped event store.
+- `kestrel_feature_observability_fleet/pubsub.py` — resumable in-process event
+  backplane.
+- `kestrel_feature_observability_fleet/static/swimlane.js` — host UI panel.
+- `tests/` — host contract, store, endpoint, stream, and UI tests.
 
-## Entry Points
+## Entry point and ownership
 
-- `kestrel_sovereign.features`: `ObservabilityFeature = "kestrel_feature_observability.feature:ObservabilityFeature"`
+`kestrel_sovereign.host_features` discovers
+`FleetObservabilityHostFeature`. Its router is mounted once at the host root;
+it must never claim `/api/observability/*`, which is selected-agent scope.
+Machine ingest is API-key authenticated by Sovereign. Any future cookie-backed
+state-changing route must also use host CSRF protection.
 
-## Key Files to Read First
-
-1. `kestrel_feature_observability/feature.py` — Observability feature and tools
-2. `kestrel_feature_observability/hook.py` — Lifecycle event hook
-
-## Running Tests
+## Verification
 
 ```bash
-uv run pytest
+uv run --extra test pytest tests/ -q
 ```
 
-## Agent-Specific Instructions
-
-- ObservabilityFeature uses the hook system for event logging
-- User-message content is not logged; keep the hook observational and non-blocking
-- Prometheus metrics use the SDK's shared registry when the optional metrics extra is installed
+For host lifecycle or routing changes, also dogfood through the deployed
+`kestrel_sovereign.server:app` with an isolated `Kite --test` agent, following
+Sovereign's `docs/architecture/testing/LIVE_AGENT_DOGFOODING.md`.
