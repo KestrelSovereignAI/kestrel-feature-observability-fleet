@@ -52,7 +52,7 @@ async def test_router_503_before_start(db_url):
     app = FastAPI()
     app.include_router(feature.get_router())
     with TestClient(app) as client:
-        resp = client.get("/api/observability/tree")
+        resp = client.get("/api/host/observability/tree")
         assert resp.status_code == 503
 
 
