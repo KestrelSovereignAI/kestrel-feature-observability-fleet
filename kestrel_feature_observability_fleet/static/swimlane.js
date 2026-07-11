@@ -14,7 +14,7 @@
 
 import { buildLanes, nestLanes, ts } from "./swimlane.lanes.js";
 
-const API_PREFIX = "/api/observability";
+const API_PREFIX = "/api/host/observability";
 
 // ── Layout constants ──────────────────────────────────────────
 
