@@ -27,38 +27,71 @@ async def client(db_url, tenant_id):
 
 
 def test_post_single_event(client):
-    resp = client.post("/api/observability/events", json=make_event(session_id="s1"))
+    resp = client.post("/api/host/observability/events", json=make_event(session_id="s1"))
     assert resp.status_code == 200
     body = resp.json()
     assert body["ingested"] == 1
     assert len(body["ids"]) == 1
 
 
+def test_cookie_csrf_helper_marks_cookie_authentication(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from kestrel_feature_observability_fleet.endpoints import _enforce_csrf
+
+    seen = {}
+
+    def fake_enforce(request, *, authed_via_cookie):
+        seen["request"] = request
+        seen["authed_via_cookie"] = authed_via_cookie
+
+    sovereign = ModuleType("kestrel_sovereign")
+    security = ModuleType("kestrel_sovereign.security")
+    csrf = ModuleType("kestrel_sovereign.security.csrf")
+    csrf.enforce_csrf = fake_enforce
+    monkeypatch.setitem(sys.modules, "kestrel_sovereign", sovereign)
+    monkeypatch.setitem(sys.modules, "kestrel_sovereign.security", security)
+    monkeypatch.setitem(sys.modules, "kestrel_sovereign.security.csrf", csrf)
+    request = object()
+    _enforce_csrf(request)
+
+    assert seen == {"request": request, "authed_via_cookie": True}
+
+
+def test_host_api_does_not_claim_agent_observability_namespace(client):
+    """Host and selected-agent observability remain distinct route scopes."""
+    response = client.post(
+        "/api/observability/events", json=make_event(session_id="legacy")
+    )
+    assert response.status_code == 404
+
+
 def test_post_batch_events(client):
     payload = {"events": [make_event(session_id="b") for _ in range(3)]}
-    resp = client.post("/api/observability/events", json=payload)
+    resp = client.post("/api/host/observability/events", json=payload)
     assert resp.status_code == 200
     assert resp.json()["ingested"] == 3
 
 
 def test_post_unknown_event_type_returns_422(client):
     resp = client.post(
-        "/api/observability/events", json=make_event(event_type="nope")
+        "/api/host/observability/events", json=make_event(event_type="nope")
     )
     assert resp.status_code == 422
 
 
 def test_post_missing_required_returns_422(client):
-    resp = client.post("/api/observability/events", json=make_event(agent_name=""))
+    resp = client.post("/api/host/observability/events", json=make_event(agent_name=""))
     assert resp.status_code == 422
 
 
 def test_post_metadata_redacted(client):
     client.post(
-        "/api/observability/events",
+        "/api/host/observability/events",
         json=make_event(session_id="red", metadata={"token": "t", "ok": 1}),
     )
-    resp = client.get("/api/observability/events", params={"session_id": "red"})
+    resp = client.get("/api/host/observability/events", params={"session_id": "red"})
     ev = resp.json()["events"][0]
     assert ev["metadata"]["token"] == "[REDACTED]"
     assert ev["metadata"]["ok"] == 1
@@ -66,7 +99,7 @@ def test_post_metadata_redacted(client):
 
 def test_get_events_filtered(client):
     client.post(
-        "/api/observability/events",
+        "/api/host/observability/events",
         json={
             "events": [
                 make_event(agent_name="a1", orchestrator="o", session_id="q"),
@@ -74,14 +107,14 @@ def test_get_events_filtered(client):
             ]
         },
     )
-    resp = client.get("/api/observability/events", params={"orchestrator": "o"})
+    resp = client.get("/api/host/observability/events", params={"orchestrator": "o"})
     assert resp.status_code == 200
     assert resp.json()["count"] == 2
 
 
 def test_get_events_subtree(client):
     client.post(
-        "/api/observability/events",
+        "/api/host/observability/events",
         json={
             "events": [
                 make_event(agent_name="root", session_id="t"),
@@ -90,7 +123,7 @@ def test_get_events_subtree(client):
         },
     )
     resp = client.get(
-        "/api/observability/events",
+        "/api/host/observability/events",
         params={"agent_name": "root", "subtree": "true"},
     )
     assert resp.json()["count"] == 2
@@ -98,7 +131,7 @@ def test_get_events_subtree(client):
 
 def test_get_tree_has_direct_node(client):
     client.post(
-        "/api/observability/events",
+        "/api/host/observability/events",
         json={
             "events": [
                 make_event(agent_name="root", session_id="t"),
@@ -106,7 +139,7 @@ def test_get_tree_has_direct_node(client):
             ]
         },
     )
-    resp = client.get("/api/observability/tree")
+    resp = client.get("/api/host/observability/tree")
     assert resp.status_code == 200
     tree = resp.json()["tree"]
     assert any(n["is_direct"] and n["label"] == "Direct" for n in tree)

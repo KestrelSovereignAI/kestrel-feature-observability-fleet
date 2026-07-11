@@ -3,13 +3,13 @@
 Mounted at the host root (no agent prefix) by :meth:`HostFeature.get_router`.
 Endpoints:
 
-* ``POST /api/observability/events`` — ingest (single or ``{"events":[…]}``
+* ``POST /api/host/observability/events`` — ingest (single or ``{"events":[…]}``
   batch), bulk insert, metadata redaction, 422 on unknown ``event_type`` or
   missing ``agent_name``/``session_id``.
-* ``GET  /api/observability/events`` — filter by orchestrator/agent/session/time
+* ``GET  /api/host/observability/events`` — filter by orchestrator/agent/session/time
   (+ ``subtree=true``).
-* ``GET  /api/observability/tree`` — orchestrator tree with a ``Direct`` node.
-* ``GET  /api/observability/stream`` — Streamable-HTTP live stream: one
+* ``GET  /api/host/observability/tree`` — orchestrator tree with a ``Direct`` node.
+* ``GET  /api/host/observability/stream`` — Streamable-HTTP live stream: one
   fetch-based endpoint, body streamed as ``text/event-stream`` with a session id
   + ``Last-Event-ID`` resumability, fanned out behind the pub/sub backplane.
 
@@ -27,7 +27,7 @@ from .store import FleetObservabilityStore, IngestError
 
 logger = logging.getLogger(__name__)
 
-API_PREFIX = "/api/observability"
+API_PREFIX = "/api/host/observability"
 
 
 def _enforce_csrf(request: Any) -> None:
@@ -42,7 +42,9 @@ def _enforce_csrf(request: Any) -> None:
         from kestrel_sovereign.security.csrf import enforce_csrf
     except Exception:  # pragma: no cover - framework absent (tests / standalone)
         return
-    enforce_csrf(request)  # pragma: no cover - requires the host
+    enforce_csrf(
+        request, authed_via_cookie=True
+    )  # pragma: no cover - requires the host
 
 
 def _parse_ts(value: Optional[str]) -> Optional[datetime]:
