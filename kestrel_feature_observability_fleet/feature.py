@@ -16,7 +16,7 @@ from kestrel_sdk import HostContext, HostFeature, UIContributions
 from kestrel_sdk.storage.database import PrivacyMode
 
 from .backplane import create_pubsub
-from .endpoints import get_router
+from .endpoints import TenantResolver, get_router
 from .store import FleetObservabilityStore
 
 logger = logging.getLogger(__name__)
@@ -58,12 +58,33 @@ class FleetObservabilityHostFeature(HostFeature):
 
     def __init__(self) -> None:
         self._store: Optional[FleetObservabilityStore] = None
+        #: Host-supplied per-request tenant resolver (INV-SOLO: ``None`` until a
+        #: host wires one, so a solo deployment falls back to the default tenant).
+        self._tenant_resolver: Optional[TenantResolver] = None
 
     # -- routing ------------------------------------------------------------
 
     def get_router(self) -> Any:
-        """Host-root router; reads the live store lazily (503 until started)."""
-        return get_router(lambda: self._store)
+        """Host-root router; reads the live store lazily (503 until started).
+
+        Wires the per-request tenant resolver via :meth:`_resolve_request_tenant`
+        so the host-supplied resolver (set from config in :meth:`on_host_start`)
+        flows into ingest/query/tree/stream. Read lazily at request time — the
+        router can be mounted before the host starts.
+        """
+        return get_router(lambda: self._store, self._resolve_request_tenant)
+
+    def _resolve_request_tenant(self, request: Any) -> Any:
+        """Delegate to the host-supplied resolver, or ``None`` (INV-SOLO).
+
+        Returning ``None`` (no resolver wired, or the resolver returned ``None``)
+        makes the store fall back to its zero-config default tenant so a solo
+        deployment keeps working with no configuration.
+        """
+        resolver = self._tenant_resolver
+        if resolver is None:
+            return None
+        return resolver(request)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -83,6 +104,12 @@ class FleetObservabilityHostFeature(HostFeature):
 
         tenant_raw = _config_get(config, "observability_fleet_tenant_id")
         tenant_id = uuid.UUID(str(tenant_raw)) if tenant_raw else FLEET_TENANT_ID
+
+        # De-pin the fixed tenant: adopt the host-supplied per-request resolver
+        # if one is configured. Absent (solo/zero-config), requests resolve no
+        # tenant and the store falls back to ``tenant_id`` above (INV-SOLO).
+        resolver = _config_get(config, "observability_tenant_resolver")
+        self._tenant_resolver = resolver if callable(resolver) else None
 
         backend = _config_get(config, "observability_backplane", "memory")
         dsn = _config_get(config, "observability_backplane_dsn")
@@ -105,6 +132,7 @@ class FleetObservabilityHostFeature(HostFeature):
         if self._store is not None:
             await self._store.close()
             self._store = None
+        self._tenant_resolver = None
         logger.info("FleetObservabilityHostFeature stopped")
 
     # -- UI -----------------------------------------------------------------

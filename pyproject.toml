@@ -48,6 +48,16 @@ test = [
     "httpx>=0.27.0",
 ]
 
+# Default dev group — auto-synced by `uv sync`/`uv run` so a bare `pytest -q`
+# has the async test plugin and TestClient stack without `--extra test`.
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.1.0",
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+]
+
 [project.urls]
 Homepage = "https://kestrelsovereign.com"
 Source = "https://github.com/KestrelSovereignAI/kestrel-feature-observability-fleet"

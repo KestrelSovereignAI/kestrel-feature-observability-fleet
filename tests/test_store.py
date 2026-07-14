@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from kestrel_feature_observability_fleet.redaction import REDACTED
@@ -116,6 +118,44 @@ async def test_tree_direct_node_and_grouping(store):
     orch = [n for n in tree if n["orchestrator"] == "root"]
     assert len(orch) == 1
     assert orch[0]["agents"][0]["agent_name"] == "child"
+
+
+async def test_solo_path_uses_default_tenant_without_resolver(store):
+    """INV-SOLO: no per-request tenant → default tenant, ingest+query still work."""
+    ids = await store.ingest([make_event(session_id="solo")])
+    assert len(ids) == 1
+    # Explicitly querying under the default tenant sees the same event.
+    events = await store.query(session_id="solo", tenant_id=store.tenant_id)
+    assert len(events) == 1
+    assert events[0]["tenant_id"] == str(store.tenant_id)
+
+
+async def test_per_request_tenant_isolation(store):
+    """Two callers with distinct resolved tenants never see each other's events."""
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+
+    await store.ingest([make_event(session_id="only-a")], tenant_id=tenant_a)
+    await store.ingest([make_event(session_id="only-b")], tenant_id=tenant_b)
+
+    a_events = await store.query(tenant_id=tenant_a)
+    b_events = await store.query(tenant_id=tenant_b)
+
+    assert {e["session_id"] for e in a_events} == {"only-a"}
+    assert {e["session_id"] for e in b_events} == {"only-b"}
+    # Fail-closed: caller A's tenant sees nothing under caller B's session.
+    assert await store.query(session_id="only-b", tenant_id=tenant_a) == []
+
+
+async def test_tree_is_tenant_scoped(store):
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+    await store.ingest([make_event(agent_name="a-agent", session_id="s")], tenant_id=tenant_a)
+    await store.ingest([make_event(agent_name="b-agent", session_id="s")], tenant_id=tenant_b)
+
+    a_tree = (await store.tree(tenant_id=tenant_a))["tree"]
+    a_agents = {agent["agent_name"] for node in a_tree for agent in node["agents"]}
+    assert a_agents == {"a-agent"}
 
 
 async def test_tree_shortens_did_shaped_values(store):

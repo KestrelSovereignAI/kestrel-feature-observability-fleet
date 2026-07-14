@@ -73,8 +73,14 @@ class FleetObservabilityStore:
         pubsub: PubSub,
     ) -> None:
         self._factory = session_factory
-        self._tenant_id = tenant_id
+        #: Zero-config fallback tenant (INV-SOLO). Used whenever a request
+        #: resolves no tenant, so a solo deployment works with no config.
+        self._default_tenant_id = tenant_id
         self._pubsub = pubsub
+
+    def _resolve(self, tenant_id: Optional[uuid.UUID]) -> uuid.UUID:
+        """Per-request tenant, falling back to the default (INV-SOLO)."""
+        return tenant_id if tenant_id is not None else self._default_tenant_id
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -134,7 +140,8 @@ class FleetObservabilityStore:
 
     @property
     def tenant_id(self) -> uuid.UUID:
-        return self._tenant_id
+        """The zero-config default tenant (INV-SOLO fallback)."""
+        return self._default_tenant_id
 
     # -- ingest -------------------------------------------------------------
 
@@ -150,12 +157,12 @@ class FleetObservabilityStore:
         if not event.get("session_id"):
             raise IngestError("session_id is required")
 
-    def _build(self, event: dict) -> ObservabilityEvent:
+    def _build(self, event: dict, tenant_id: uuid.UUID) -> ObservabilityEvent:
         self._validate(event)
         metadata = event.get("metadata")
         redacted = redact_metadata(dict(metadata)) if isinstance(metadata, dict) else None
         return ObservabilityEvent(
-            tenant_id=self._tenant_id,
+            tenant_id=tenant_id,
             orchestrator=event.get("orchestrator"),
             agent_name=event["agent_name"],
             session_id=event["session_id"],
@@ -170,14 +177,19 @@ class FleetObservabilityStore:
             stage=event.get("stage"),
         )
 
-    async def ingest(self, events: list[dict]) -> list[str]:
+    async def ingest(
+        self, events: list[dict], *, tenant_id: Optional[uuid.UUID] = None
+    ) -> list[str]:
         """Validate, redact, and **bulk insert** ``events``; publish each live.
 
-        Returns the created event ids. All-or-nothing: any invalid event raises
-        :class:`IngestError` before anything is written.
+        Events are stamped with the per-request ``tenant_id`` (or the zero-config
+        default when none is resolved). Returns the created event ids.
+        All-or-nothing: any invalid event raises :class:`IngestError` before
+        anything is written.
         """
-        rows = [self._build(e) for e in events]  # validate all up front
-        with TenantContext.use(self._tenant_id):
+        resolved = self._resolve(tenant_id)
+        rows = [self._build(e, resolved) for e in events]  # validate all up front
+        with TenantContext.use(resolved):
             async with self._factory.write_session() as session:
                 session.add_all(rows)
                 await session.flush()
@@ -198,6 +210,7 @@ class FleetObservabilityStore:
         until: Optional[datetime] = None,
         subtree: bool = False,
         limit: int = 200,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> list[dict]:
         """Filter events. With ``subtree`` and an ``agent_name``, include events
         that agent orchestrates (``orchestrator == agent_name``) as well as its
@@ -222,25 +235,25 @@ class FleetObservabilityStore:
             stmt = stmt.where(ObservabilityEvent.ts <= until)
         stmt = stmt.order_by(ObservabilityEvent.ts.desc()).limit(limit)
 
-        with TenantContext.use(self._tenant_id):
+        with TenantContext.use(self._resolve(tenant_id)):
             async with self._factory.read_session() as session:
                 result = await session.execute(stmt)
                 return [row.to_dict() for row in result.scalars().all()]
 
     # -- tree ---------------------------------------------------------------
 
-    async def tree(self) -> dict:
+    async def tree(self, *, tenant_id: Optional[uuid.UUID] = None) -> dict:
         """Orchestrator → agents grouping over stored friendly names.
 
         Groups by the ``orchestrator`` / ``agent_name`` values **as stored** (no
         DID resolution). ``orchestrator = null`` collects under a top-level
-        ``"Direct"`` node.
+        ``"Direct"`` node. Scoped to the per-request ``tenant_id`` (or default).
         """
         stmt = select(
             ObservabilityEvent.orchestrator,
             ObservabilityEvent.agent_name,
         )
-        with TenantContext.use(self._tenant_id):
+        with TenantContext.use(self._resolve(tenant_id)):
             async with self._factory.read_session() as session:
                 result = await session.execute(stmt)
                 pairs = result.all()
