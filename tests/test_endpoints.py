@@ -168,3 +168,71 @@ async def test_stream_generator_delivers_live_event(store):
     assert frame.startswith("id: ")
     assert '"session_id": "live"' in frame
     await gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_generator_is_tenant_scoped(store):
+    """A subscriber only sees frames for its resolved tenant (fail-closed)."""
+    import uuid
+
+    from kestrel_feature_observability_fleet.endpoints import event_stream
+
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+    gen = event_stream(store, last_event_id=0, session_id="sess", tenant_id=tenant_a)
+    assert (await gen.__anext__()).startswith(": stream ")
+    assert (await gen.__anext__()).startswith("retry:")
+    # Another tenant's event is published but must be filtered out; tenant A's is delivered.
+    await store.ingest([make_event(session_id="b-only")], tenant_id=tenant_b)
+    await store.ingest([make_event(session_id="a-only")], tenant_id=tenant_a)
+    frame = await gen.__anext__()
+    assert '"session_id": "a-only"' in frame
+    assert "b-only" not in frame
+    await gen.aclose()
+
+
+@pytest_asyncio.fixture
+async def isolating_client(db_url, tenant_id):
+    """Router wired with a header-driven resolver mapping callers to tenants."""
+    import uuid
+
+    fastapi = pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+
+    def resolver(request):
+        return tenant_a if request.headers.get("X-Caller") == "a" else tenant_b
+
+    store = await FleetObservabilityStore.open(db_url, tenant_id)
+    app = fastapi.FastAPI()
+    app.include_router(get_router(lambda: store, resolver))
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        await store.close()
+
+
+def test_resolver_isolates_two_callers(isolating_client):
+    """A resolver returning distinct tenants isolates ingest+query per caller."""
+    c = isolating_client
+    c.post(
+        "/api/host/observability/events",
+        json=make_event(session_id="from-a"),
+        headers={"X-Caller": "a"},
+    )
+    c.post(
+        "/api/host/observability/events",
+        json=make_event(session_id="from-b"),
+        headers={"X-Caller": "b"},
+    )
+    a_events = c.get(
+        "/api/host/observability/events", headers={"X-Caller": "a"}
+    ).json()["events"]
+    b_events = c.get(
+        "/api/host/observability/events", headers={"X-Caller": "b"}
+    ).json()["events"]
+    assert {e["session_id"] for e in a_events} == {"from-a"}
+    assert {e["session_id"] for e in b_events} == {"from-b"}
