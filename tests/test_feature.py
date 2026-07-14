@@ -63,6 +63,85 @@ def test_get_ui_contributions_ships_swimlane():
     assert any("swimlane.js" in m for m in contributions.modules)
 
 
+@pytest.mark.asyncio
+async def test_router_solo_default_when_no_resolver(db_url):
+    """INV-SOLO: with no resolver configured, the production router still works."""
+    pytest.importorskip("fastapi")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    feature = FleetObservabilityHostFeature()
+    await feature.on_host_start(_ctx(db_url))
+    assert feature._tenant_resolver is None
+
+    app = FastAPI()
+    app.include_router(feature.get_router())
+    try:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/host/observability/events",
+                json={"agent_name": "a", "session_id": "solo", "event_type": "metric"},
+            )
+            assert resp.status_code == 200
+            events = client.get("/api/host/observability/events").json()["events"]
+            assert {e["session_id"] for e in events} == {"solo"}
+    finally:
+        await feature.on_host_stop(_ctx(db_url))
+
+
+@pytest.mark.asyncio
+async def test_router_isolates_callers_via_host_supplied_resolver(db_url):
+    """A host-configured resolver flows through the production feature path and
+    isolates two callers' ingest+query (fail-closed)."""
+    import uuid
+
+    pytest.importorskip("fastapi")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+
+    def resolver(request):
+        return tenant_a if request.headers.get("X-Caller") == "a" else tenant_b
+
+    ctx = SimpleNamespace(
+        config={
+            "observability_fleet_db_url": db_url,
+            "observability_tenant_resolver": resolver,
+        }
+    )
+
+    feature = FleetObservabilityHostFeature()
+    await feature.on_host_start(ctx)
+    assert feature._tenant_resolver is resolver
+
+    app = FastAPI()
+    app.include_router(feature.get_router())
+    try:
+        with TestClient(app) as client:
+            client.post(
+                "/api/host/observability/events",
+                json={"agent_name": "a", "session_id": "from-a", "event_type": "metric"},
+                headers={"X-Caller": "a"},
+            )
+            client.post(
+                "/api/host/observability/events",
+                json={"agent_name": "b", "session_id": "from-b", "event_type": "metric"},
+                headers={"X-Caller": "b"},
+            )
+            a_events = client.get(
+                "/api/host/observability/events", headers={"X-Caller": "a"}
+            ).json()["events"]
+            b_events = client.get(
+                "/api/host/observability/events", headers={"X-Caller": "b"}
+            ).json()["events"]
+            assert {e["session_id"] for e in a_events} == {"from-a"}
+            assert {e["session_id"] for e in b_events} == {"from-b"}
+    finally:
+        await feature.on_host_stop(ctx)
+
+
 def test_entry_point_registered():
     from importlib.metadata import entry_points
 

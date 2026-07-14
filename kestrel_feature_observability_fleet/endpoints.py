@@ -18,16 +18,39 @@ routes use the host CSRF via :func:`_enforce_csrf`; ingest is API-key (machine)
 and therefore CSRF-exempt.
 """
 
+import inspect
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Union
 
 from .store import FleetObservabilityStore, IngestError
 
 logger = logging.getLogger(__name__)
 
 API_PREFIX = "/api/host/observability"
+
+#: A host-supplied tenant resolver: maps a request to its tenant. May return the
+#: :class:`uuid.UUID` directly or an awaitable of one. When absent (or it
+#: returns ``None``), the store falls back to its zero-config default tenant.
+TenantResolver = Callable[[Any], Union[uuid.UUID, Awaitable[Optional[uuid.UUID]], None]]
+
+
+async def _resolve_tenant(
+    resolver: Optional[TenantResolver], request: Any
+) -> Optional[uuid.UUID]:
+    """Resolve the per-request tenant, awaiting an async resolver if needed.
+
+    Returns ``None`` when no resolver is wired so the store falls back to the
+    zero-config default tenant (INV-SOLO).
+    """
+    if resolver is None:
+        return None
+    result = resolver(request)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 def _enforce_csrf(request: Any) -> None:
@@ -64,28 +87,44 @@ async def event_stream(
     *,
     last_event_id: Optional[int] = None,
     session_id: str,
+    tenant_id: Optional[uuid.UUID] = None,
 ) -> AsyncIterator[str]:
     """Yield SSE frames: a session preamble, replayed backlog, then live events.
 
     Resumable — replays buffered frames whose id is greater than
     ``last_event_id`` before switching to live delivery. The ``id:`` on each
     frame is echoed back by the browser as ``Last-Event-ID`` on reconnect.
+
+    Fail-closed per tenant: a subscriber only sees frames for its resolved
+    tenant (``tenant_id`` or the store's zero-config default). The backplane
+    ring is shared across tenants, so frames are filtered here by ``tenant_id``.
     """
+    tenant_str = str(tenant_id if tenant_id is not None else store.tenant_id)
     yield f": stream {session_id}\n\n"
     yield "retry: 3000\n\n"
     subscription = store.pubsub.subscribe(last_event_id=last_event_id)
     try:
         async for stream_id, event in subscription:
+            if event.get("tenant_id") != tenant_str:
+                continue
             yield _sse_frame(stream_id, event)
     finally:
         await subscription.aclose()
 
 
-def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) -> Any:
+def get_router(
+    store_provider: Callable[[], Optional[FleetObservabilityStore]],
+    tenant_resolver: Optional[TenantResolver] = None,
+) -> Any:
     """Build the host-root ``APIRouter``.
 
     ``store_provider`` returns the live store (or ``None`` before host start);
     routes 503 until the store is open.
+
+    ``tenant_resolver`` (host-supplied) resolves each request to its tenant so
+    ingest/query/stream are isolated per caller. When ``None`` (or it resolves
+    ``None``), the store falls back to its zero-config default tenant so a solo
+    deployment works with no configuration (INV-SOLO).
     """
     from fastapi import APIRouter, HTTPException, Query, Request
     from fastapi.responses import StreamingResponse
@@ -119,8 +158,9 @@ def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) 
         if not isinstance(events, list) or not events:
             raise HTTPException(422, "no events to ingest")
 
+        tenant_id = await _resolve_tenant(tenant_resolver, request)
         try:
-            ids = await store.ingest(events)
+            ids = await store.ingest(events, tenant_id=tenant_id)
         except IngestError as exc:
             raise HTTPException(422, str(exc))
         return {"ingested": len(ids), "ids": ids}
@@ -137,6 +177,7 @@ def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) 
         limit: int = Query(200, ge=1, le=1000),
     ) -> dict:
         store = _store()
+        tenant_id = await _resolve_tenant(tenant_resolver, request)
         try:
             events = await store.query(
                 orchestrator=orchestrator,
@@ -146,6 +187,7 @@ def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) 
                 until=_parse_ts(until),
                 subtree=subtree,
                 limit=limit,
+                tenant_id=tenant_id,
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc))
@@ -154,7 +196,8 @@ def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) 
     @router.get("/tree")
     async def get_tree(request: Request) -> dict:
         store = _store()
-        return await store.tree()
+        tenant_id = await _resolve_tenant(tenant_resolver, request)
+        return await store.tree(tenant_id=tenant_id)
 
     @router.get("/stream")
     async def stream(request: Request) -> Any:
@@ -163,8 +206,12 @@ def get_router(store_provider: Callable[[], Optional[FleetObservabilityStore]]) 
         header_id = request.headers.get("Last-Event-ID")
         last_event_id = int(header_id) if header_id and header_id.isdigit() else None
         session_id = uuid_hex()
+        tenant_id = await _resolve_tenant(tenant_resolver, request)
         generator = event_stream(
-            store, last_event_id=last_event_id, session_id=session_id
+            store,
+            last_event_id=last_event_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
         )
         return StreamingResponse(
             generator,
