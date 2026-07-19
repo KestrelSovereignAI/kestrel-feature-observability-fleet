@@ -1,3 +1,14 @@
+# ⚠️ DEPRECATED & ARCHIVED
+
+This package is superseded. Kestrel observability is now **OpenTelemetry-native**:
+emission lives in [`kestrel-feature-observability`](https://github.com/KestrelSovereignAI/kestrel-feature-observability)
+(+ `kestrel_sdk.tracing` in the SDK), and the UI is a host-supervised, embedded
+**Arize Phoenix** (see `kestrel-sovereign`'s `phoenix_supervisor`). The custom
+fleet store/routes/panels this package provided were retired in
+kestrel-feature-observability#39 (epic #32). Do not install; last release: 0.4.0.
+
+---
+
 # kestrel-feature-observability-fleet
 
 Fleet-scoped observability **HostFeature** for Kestrel Sovereign.
