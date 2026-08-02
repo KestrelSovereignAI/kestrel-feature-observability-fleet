@@ -5,7 +5,8 @@ emission lives in [`kestrel-feature-observability`](https://github.com/KestrelSo
 (+ `kestrel_sdk.tracing` in the SDK), and the UI is a host-supervised, embedded
 **Arize Phoenix** (see `kestrel-sovereign`'s `phoenix_supervisor`). The custom
 fleet store/routes/panels this package provided were retired in
-kestrel-feature-observability#39 (epic #32). Do not install; last release: 0.4.0.
+kestrel-feature-observability#39 (epic #32). Do not install for new deployments;
+0.4.1 is a compatibility-only release so existing fleets can resolve the current SDK.
 
 ---
 
@@ -34,7 +35,7 @@ uv pip install kestrel-feature-observability-fleet
 
 Auto-discovered by the Kestrel Sovereign host at host scope; enable via the host
 feature manifest. Requires a host running the host-feature runtime
-(kestrel-sovereign `HostFeature` support, SDK ≥ 0.29.2).
+(kestrel-sovereign `HostFeature` support, SDK `>=0.34,<0.35`).
 
 ## Status
 

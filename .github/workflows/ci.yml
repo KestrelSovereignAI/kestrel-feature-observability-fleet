@@ -45,9 +45,12 @@ jobs:
           from kestrel_feature_observability_fleet import FleetObservabilityHostFeature
           from kestrel_feature_observability_fleet.feature import FleetObservabilityHostFeature as F2
           from kestrel_sdk import HostFeature
+          import importlib.metadata as md
           assert FleetObservabilityHostFeature is F2
           assert issubclass(FleetObservabilityHostFeature, HostFeature)
-          print('kestrel_feature_observability_fleet imports OK')
+          sdk_version = md.version('kestrel-sovereign-sdk')
+          assert sdk_version.split('.')[:2] == ['0', '34'], sdk_version
+          print(f'kestrel_feature_observability_fleet imports OK with SDK {sdk_version}')
           "
         timeout-minutes: 3
 
@@ -119,7 +122,9 @@ jobs:
           eps = md.entry_points(group='kestrel_sovereign.host_features')
           names = [e.name for e in eps]
           assert 'FleetObservabilityHostFeature' in names, f'Entry-point not registered: {names}'
-          print(f'kestrel-feature-observability-fleet installs + host-feature entry-point OK on Python ${{ matrix.python-version }}')
+          sdk_version = md.version('kestrel-sovereign-sdk')
+          assert sdk_version.split('.')[:2] == ['0', '34'], sdk_version
+          print(f'kestrel-feature-observability-fleet installs + host-feature entry-point OK on Python ${{ matrix.python-version }} with SDK {sdk_version}')
           "
 
   test:

@@ -1,6 +1,6 @@
 [project]
 name = "kestrel-feature-observability-fleet"
-version = "0.4.0"
+version = "0.4.1"
 description = "Fleet-scoped observability HostFeature for Kestrel Sovereign — fleet-wide event store (entities/tenant-scoped), host-root ingest/query, a streamable live stream, and the orchestrator swimlane panel"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -32,7 +32,7 @@ classifiers = [
 ]
 dependencies = [
     # HostFeature / HostContext / UIContributions contract (Phase 0).
-    "kestrel-sovereign-sdk>=0.29.2,<0.30",
+    "kestrel-sovereign-sdk>=0.34,<0.35",
     # Fleet event store: SQLAlchemy 2.0 async + Alembic, fail-closed tenant scoping.
     "kestrel-feature-entities>=0.1,<1",
 ]
@@ -41,7 +41,7 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=1.1.0",
-    "kestrel-sovereign-sdk>=0.29.2,<0.30",
+    "kestrel-sovereign-sdk>=0.34,<0.35",
     "kestrel-feature-entities>=0.1,<1",
     # Host-root routers exercised via FastAPI TestClient; host-provided at runtime.
     "fastapi>=0.110.0",
